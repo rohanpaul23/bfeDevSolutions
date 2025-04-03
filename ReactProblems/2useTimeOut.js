@@ -6,7 +6,7 @@ export function useTimeout(callback: () => void, delay: number) {
   
   useEffect(()=>{
     let timerId = setTimeout(()=>{
-      callback()
+      callbackRef.current()
     },delay)
 
     return(()=>{
