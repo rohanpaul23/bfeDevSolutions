@@ -1,22 +1,28 @@
+
 /**
- * @param {any[]} items
- * @param {number[]} newOrder
- * @return {void}
+ * @param {any} target
+ * @param {any[]} sources
+ * @return {object}
  */
-function sort(items, newOrder) {
-    for(let i=0;i<newOrder.length;i++){
-        let newIndex = newOrder[i]
-        if(newIndex !== i){
-            swap(items, i, newOrder[i])
-            swap(newOrder, i, newOrder[i])
-        }
+function objectAssign(target, ...sources) {
+  if(target === null || target ===  undefined){
+    throw Error();
+  }
+
+  target = Object(target);
+  for (let source of sources) {
+    if(source == null) continue;
+    const allKeys = [...Object.keys(source), ...Object.getOwnPropertySymbols(source)]
+    merge(allKeys, source);
+  }
+
+  function merge(keys = [], currSource) {
+    for (let key of keys) {
+      target[key] = currSource[key];
+      if(target[key] !== currSource[key]) {
+        throw Error();
+      }
     }
+  }
+  return target;
 }
-
-
-function swap(arr, i, j) {
-    [arr[i], arr[j]] = [arr[j], arr[i]]
-}
-
-const items = ['A', 'B', 'C', 'D', 'E', 'F']
-const newOrder = [1,   5,   4,   3,   2,   0]
