@@ -15,7 +15,7 @@ function stringify(data) {
         return undefined
     }
     
-    if(typeOfData === 'object' || || typeOfData === 'map'){
+    if(typeOfData === 'object' || typeOfData === 'map'){
         return _stringifyObject(data);
     }
 

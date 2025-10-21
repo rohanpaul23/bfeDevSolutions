@@ -21,11 +21,10 @@ export function useHover<T extends HTMLElement>(): [Ref<T>, boolean] {
     }
     // To handle second test case to remove event listeners of previous ref
     ref.current = node
-
-      if(node){
-        node.addEventListener('mouseenter', onMouseEnter);
-        node.addEventListener('mouseleave', onMouseLeave);
-      }
+    if(node){
+      node.addEventListener('mouseenter', onMouseEnter);
+      node.addEventListener('mouseleave', onMouseLeave);
+    }
     },[])
 
   return [callBackRef, isHovered];
