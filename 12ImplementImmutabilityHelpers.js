@@ -100,3 +100,6 @@ function _update(data, command) {
     }
   }
 }
+
+
+update([1], {$push: [2, 3]}) 

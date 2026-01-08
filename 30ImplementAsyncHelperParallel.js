@@ -1,42 +1,30 @@
-
 /*
-type Callback = (error: Error, data: any) => void
+Callback signature:
+(error: Error | null, data: any) => void
 
-type AsyncFunc = (
-   callback: Callback,
-   data: any
-) => void
-
+Each async function signature:
+(callback: Callback, data: any) => void
 */
-function parallel(funcs){
-    return function(finalCallback,data){
-      let results = new Array(funcs.length);
-      let hasError = false;
-      let count = 0;
-       funcs.forEach((func, i) => {
-        func((err, data) => {
-          if (hasError) {
-            return;
-          }
-  
-          if (err) {
-            hasError = true;
-            finalCallback(err, undefined);
-            return;
-          }
-          
-          if (err) {
-            finalCallback(err, undefined);
-            return;
-          }
-  
-          results[i] = data;
-          count++;
-  
-          if (count === funcs.length) {
-            finalCallback(undefined, results);
-          }
-        }, data);
-      });
+
+function parallel(funcs) {
+  // Return a function that starts all async funcs in parallel
+  return function (finalCallback, data) {
+    // Array to store results in the same order as funcs
+    const results = new Array(funcs.length);
+
+    // Track how many functions have completed successfully
+    let completedCount = 0;
+
+    // Flag to ensure finalCallback is called only once (on first error)
+    let hasError = false;
+
+    // Edge case: no async functions
+    if (funcs.length === 0) {
+      return finalCallback(null, results);
     }
-  }
+
+    // Start all async functions in parallel
+    funcs.forEach((func, index) => {
+      // Call each async function
+      func((err, result) => {
+        // If an er

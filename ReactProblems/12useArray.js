@@ -27,7 +27,7 @@ export function useArray<T>(initialValue: T[]): { value: T[] } & UseArrayActions
     // Functional update form ensures we always work with the latest state
     setValue((prevValue) => {
       // Create a shallow copy so we don’t mutate the original array
-      const newValue = [...prevValue];
+      const newValue = [...prevValue]; 
       // Remove one element at the given index
       newValue.splice(index, 1);
       // Return the updated array as the new state
