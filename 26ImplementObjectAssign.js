@@ -11,17 +11,14 @@ function objectAssign(target, ...sources) {
 
   target = Object(target);
   for (let source of sources) {
-    console.log("source",source)
     if(source == null) continue;
     const allKeys = [...Object.keys(source), ...Object.getOwnPropertySymbols(source)]
-     for (let key of allKeys) {
-      target[key] = currSource[key];
-      if(target[key] !== currSource[key]) {
+    for (let key of allKeys) {
+      target[key] = source[key];
+      if(target[key] !== source[key]) {
         throw Error();
       }
     }
   }
   return target;
 }
-
-objectAssign({}, {a:3}, {b:4})  

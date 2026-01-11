@@ -1,30 +1,27 @@
-/*
-Callback signature:
-(error: Error | null, data: any) => void
-
-Each async function signature:
-(callback: Callback, data: any) => void
-*/
-
 function parallel(funcs) {
-  // Return a function that starts all async funcs in parallel
-  return function (finalCallback, data) {
-    // Array to store results in the same order as funcs
+  return function finalRunner(finalCallback, data) {
     const results = new Array(funcs.length);
+    let completed = 0;
+    let done = false; // prevents multiple finalCallback calls
 
-    // Track how many functions have completed successfully
-    let completedCount = 0;
-
-    // Flag to ensure finalCallback is called only once (on first error)
-    let hasError = false;
-
-    // Edge case: no async functions
-    if (funcs.length === 0) {
-      return finalCallback(null, results);
-    }
-
-    // Start all async functions in parallel
     funcs.forEach((func, index) => {
-      // Call each async function
-      func((err, result) => {
-        // If an er
+      func((error, result) => {
+        if (done) return;
+
+        if (error) {
+          done = true;
+          finalCallback(error, undefined);
+          return;
+        }
+
+        results[index] = result;
+        completed++;
+
+        if (completed === funcs.length) {
+          done = true;
+          finalCallback(undefined, results);
+        }
+      }, data);
+    });
+  };
+}
