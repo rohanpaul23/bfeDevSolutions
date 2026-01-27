@@ -11,7 +11,7 @@ function wrap(arr) {
         if (index < 0) {
           index = arr.length + index
           return Reflect.get(target, index)
-        }
+        } 
         return Reflect.get(target, property)
       },
       set(target, property, value) {

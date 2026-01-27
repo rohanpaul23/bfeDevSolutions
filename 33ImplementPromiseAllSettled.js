@@ -1,39 +1,33 @@
 function allSettled(promises) {
+  return new Promise((resolve) => {
     if (promises.length === 0) {
-      return Promise.resolve([]);
+      resolve([]);
+      return;
     }
-  
-    const results = Array(promises.length);
-    let count = 0;
-  
-    return new Promise((resolve, reject) => {
-      promises.forEach((promise, i) => {
-        if (!(promise instanceof Promise)) {
-          promise = Promise.resolve(promise);
-        }
-        promise.then((value)=>{
-          results[i] = {
-            status: 'fulfilled',
+
+    const results = new Array(promises.length);
+    let completed = 0;
+
+    promises.forEach((p, index) => {
+      Promise.resolve(p)
+        .then((value) => {
+          results[index] = {
+            status: "fulfilled",
             value,
           };
-          count++;
-
-          if(count === promises.length){
-            resolve(results)
-          }
         })
-        .catch((reason)=>{
-           results[i] = {
-            status: 'rejected',
+        .catch((reason) => {
+          results[index] = {
+            status: "rejected",
             reason,
           };
-
-          count++;
-
-          if(count === promises.length){
-            resolve(results)
-          }
         })
-      });
+        .finally(() => {
+          completed++;
+          if (completed === promises.length) {
+            resolve(results);
+          }
+        });
     });
+  });
 }
