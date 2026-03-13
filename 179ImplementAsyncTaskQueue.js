@@ -1,68 +1,95 @@
-/**
- * AsyncTaskQueue is a concurrency-controlled task runner.
- * It ensures that no more than a specified number of asynchronous tasks
- * are executed in parallel. Additional tasks are queued and processed
- * as running tasks complete.
- */
 class AsyncTaskQueue {
-  // Maximum number of tasks allowed to run concurrently
-  private limit = 0;
+  // Maximum number of tasks allowed to run at the same time
+  private concurrency: number;
 
-  // Current count of tasks running in parallel
-  private runningTasks = 0;
+  // How many tasks are currently running right now
+  private runningCount: number;
 
-  // Queue of pending tasks (each task is a function returning a Promise)
-  private pendingQueue: Array<() => Promise<unknown>> = [];
+  // Tasks waiting for their turn
+  private taskQueue: Array<() => Promise<void>>;
 
-  /**
-   * @param concurrency - Maximum number of concurrent async tasks allowed.
-   */
   constructor(concurrency: number) {
-    this.limit = concurrency;
+    // Save the concurrency limit
+    this.concurrency = concurrency;
+
+    // At the beginning, nothing is running
+    this.runningCount = 0;
+
+    // Start with an empty waiting queue
+    this.taskQueue = [];
   }
 
-  /**
-   * Adds a new async task to the queue.
-   * If the number of running tasks is below the limit, it immediately starts execution.
-   * Otherwise, the task waits in the pending queue.
-   * 
-   * @param task - A function that returns a Promise (representing the async task)
-   */
   queue(task: () => Promise<void>) {
-    // Add the task to the pending queue
-    this.pendingQueue.push(task);
+    // Add the new task to the waiting queue
+    this.taskQueue.push(task);
 
-    // Attempt to start execution of the next task if possible
-    this.runNextTask();
+    // After adding a task, try to start tasks if there is free capacity
+    this.runNext();
   }
 
-  /**
-   * Checks if a new task can be started based on concurrency limit.
-   * If yes, it dequeues and executes the next task from the pending queue.
-   * Automatically triggers the next one when a task finishes (success or failure).
-   */
-  private runNextTask() {
-    // Stop if the concurrency limit is reached or if no pending tasks exist
-    if (this.runningTasks >= this.limit || this.pendingQueue.length === 0) {
+  private runNext() {
+    // -------------------------------
+    // Case 1: already running max tasks
+    // -------------------------------
+    // Example:
+    // concurrency = 2
+    // runningCount = 2
+    // That means no more tasks can start right now
+    if (this.runningCount >= this.concurrency) {
       return;
     }
 
-    // Remove the next task from the queue
-    const taskToRun = this.pendingQueue.shift()!;
+    // -------------------------------
+    // Case 2: no waiting tasks
+    // -------------------------------
+    // Nothing to run, so just stop
+    if (this.taskQueue.length === 0) {
+      return;
+    }
 
-    // Increment the running task counter
-    this.runningTasks++;
+    // -------------------------------
+    // Take the next task from the front of the queue
+    // -------------------------------
+    // shift() removes and returns the first waiting task
+    const nextTask = this.taskQueue.shift()!;
 
-    // Execute the task
-    taskToRun()
-      .then((result) => console.log("Executed task:", result))
-      .catch((error) => console.log("Failed task:", error))
+    // We are about to start one task,
+    // so increase the number of running tasks
+    this.runningCount++;
+
+    // -------------------------------
+    // Run the task
+    // -------------------------------
+    // nextTask() returns a Promise<void>
+    nextTask()
+      .catch(() => {
+        // We ignore task errors here so that one failed task
+        // does not break the queue logic.
+        //
+        // Important:
+        // Even if the task fails, we still want the queue
+        // to continue running later tasks.
+      })
       .finally(() => {
-        // Decrement the count once the task finishes
-        this.runningTasks--;
+        // This block runs whether the task:
+        // - resolves successfully
+        // - rejects with an error
+        //
+        // The task is now finished, so free one running slot
+        this.runningCount--;
 
-        // Attempt to run the next queued task
-        this.runNextTask();
+        // Since one slot became free, try to start another waiting task
+        this.runNext();
       });
+
+    // -------------------------------
+    // Important detail
+    // -------------------------------
+    // This version starts only one task per runNext() call.
+    // That is okay because:
+    // - queue() calls runNext() every time a new task is added
+    // - finally() calls runNext() again whenever a task finishes
+    //
+    // So over time, tasks continue to flow correctly.
   }
 }
