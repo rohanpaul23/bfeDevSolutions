@@ -1,154 +1,147 @@
-// ---------------------------------------------
-// Checks whether a path segment should be treated
-// as a valid array index.
-//
-// Valid:
-//   "0", "1", "2", "10"
-//
-// Invalid (treated as object keys):
-//   "01", "001", "-1", "1.5", "abc"
-// ---------------------------------------------
-const isValidArrayIndexSegment = (seg: string): boolean =>
-  /^(0|[1-9]\d*)$/.test(seg);
+/**
+ * set(obj, path, value)
+ *
+ * Set a value inside an object using a path.
+ *
+ * Path can be:
+ *  - "a.b.c"
+ *  - "a.b.c[0]"
+ *  - ["a","b","c","2"]
+ *
+ * Rules:
+ *  - create missing objects / arrays
+ *  - valid numbers → array index
+ *  - invalid numbers like "01" → string key
+ *  - modify object in-place
+ */
 
-// ---------------------------------------------
-// Converts any supported path format into
-// a normalized array of string segments.
-//
-// Examples:
-//   "a.b.c[1]"   → ["a", "b", "c", "1"]
-//   "a.c.d.01"   → ["a", "c", "d", "01"]
-//   ["a","b"]    → ["a", "b"]
-// ---------------------------------------------
-function toPath(path: string | string[]): string[] {
-  // If the path is already an array, ensure
-  // all segments are strings and return it.
-  if (Array.isArray(path)) return path.map(String);
-
-  // Convert bracket notation to dot notation
-  // Example:
-  //   "a.b.c[1]" → "a.b.c.1"
-  const normalized = path.replace(/\[(.+?)\]/g, ".$1");
-
-  // Split by dots and remove empty segments
-  // Example:
-  //   ".a..b." → ["a", "b"]
-  return normalized.split(".").filter(Boolean);
-}
-
-// ---------------------------------------------
-// Checks if a value can act as a container
-// we can traverse into (object / array / function)
-//
-// Rejects:
-//   null, undefined, numbers, strings, booleans
-// ---------------------------------------------
-function isObjectLike(v: any): v is object {
-  return v !== null && (typeof v === "object" || typeof v === "function");
-}
-
-// ---------------------------------------------
-// set(obj, path, value)
-//
-// Mutates `obj` by assigning `value` at `path`.
-// Creates missing objects / arrays on the fly,
-// choosing the correct type based on the *next*
-// path segment.
-// ---------------------------------------------
 function set<T extends object>(
   obj: T,
   path: string | string[],
   value: any
-): void {
-  // Normalize path into array form
-  const parts = toPath(path);
+) {
+  // Convert path into array of keys
+  // "a.b.c[1]" → ["a","b","c","1"]
+  const keys = Array.isArray(path) ? path : parsePath(path);
 
-  // If path is empty, nothing to set
-  if (parts.length === 0) return;
+  // Start from root object
+  let current: any = obj;
 
-  // `curr` always points to the current container
-  // as we walk down the object
-  let curr: any = obj;
+  // Traverse keys one by one
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
 
-  // Walk through each path segment
-  for (let i = 0; i < parts.length; i++) {
-    const key = parts[i];
+    // Check if this is last key in path
+    const isLast = i === keys.length - 1;
 
-    // Check if this is the final segment
-    const isLast = i === parts.length - 1;
-
-    // -----------------------------------------
-    // CASE 1: Final segment → perform assignment
-    // -----------------------------------------
+    // If last key → set value
     if (isLast) {
-      // If the current container is an array
-      // AND the key is a valid numeric index,
-      // write using a numeric index
-      if (Array.isArray(curr) && isValidArrayIndexSegment(key)) {
-        curr[Number(key)] = value;
+      current[key] = value;
+      return obj;
+    }
+
+    // If key does not exist → create it
+    if (current[key] == null) {
+
+      // Look at next key to decide
+      // whether to create object or array
+      const nextKey = keys[i + 1];
+
+      // If next key is valid array index → create array
+      if (isArrayIndex(nextKey)) {
+        current[key] = [];
       } else {
-        // Otherwise, treat it as a normal
-        // object property
-        curr[key] = value;
-      }
-
-      // Assignment complete, stop traversal
-      return;
-    }
-
-    // -----------------------------------------
-    // CASE 2: Intermediate segment
-    // Ensure the next container exists
-    // -----------------------------------------
-
-    // Look ahead to the next path segment
-    const nextKey = parts[i + 1];
-
-    // Decide whether the next container
-    // should be an array or an object
-    const shouldCreateArrayNext = isValidArrayIndexSegment(nextKey);
-
-    // If the current container itself is an array
-    // and the current key is a valid index,
-    // access it numerically (curr[0] instead of curr["0"])
-    const currIsArrayIndex =
-      Array.isArray(curr) && isValidArrayIndexSegment(key);
-
-    // Determine how to access the current property
-    const accessKey = currIsArrayIndex ? Number(key) : key;
-
-    // Grab the existing value at this path (if any)
-    const existing = curr[accessKey];
-
-    // -----------------------------------------
-    // If the property does not exist OR
-    // exists but is not object-like,
-    // we must create a new container
-    // -----------------------------------------
-    if (!isObjectLike(existing)) {
-      // Create array or object depending on
-      // the *next* path segment
-      curr[accessKey] = shouldCreateArrayNext ? [] : {};
-    } else {
-      // ---------------------------------------
-      // If a container exists but is the
-      // wrong type, replace it
-      // ---------------------------------------
-
-      // Next segment expects an array,
-      // but existing value is not an array
-      if (shouldCreateArrayNext && !Array.isArray(existing)) {
-        curr[accessKey] = [];
-      }
-
-      // Next segment expects an object,
-      // but existing value is an array
-      if (!shouldCreateArrayNext && Array.isArray(existing)) {
-        curr[accessKey] = {};
+        // Otherwise create object
+        current[key] = {};
       }
     }
 
-    // Move the pointer deeper into the object
-    curr = curr[accessKey];
+    // Move deeper
+    current = current[key];
   }
+
+  return obj;
+}
+
+
+/**
+ * Convert string path into array of keys
+ *
+ * Examples:
+ *  "a.b.c" → ["a","b","c"]
+ *  "a.b.c[1]" → ["a","b","c","1"]
+ *  "a.c.d.01" → ["a","c","d","01"]
+ */
+function parsePath(path: string): string[] {
+
+  const result: string[] = [];
+
+  let token = "";
+
+  for (let i = 0; i < path.length; i++) {
+
+    const ch = path[i];
+
+    // Dot means new key
+    if (ch === ".") {
+      if (token) {
+        result.push(token);
+        token = "";
+      }
+    }
+
+    // Bracket start → read until ]
+    else if (ch === "[") {
+
+      // push previous token if exists
+      if (token) {
+        result.push(token);
+        token = "";
+      }
+
+      let j = i + 1;
+      let bracketValue = "";
+
+      // read number inside []
+      while (j < path.length && path[j] !== "]") {
+        bracketValue += path[j];
+        j++;
+      }
+
+      result.push(bracketValue);
+
+      // skip to closing bracket
+      i = j;
+    }
+
+    // normal character
+    else {
+      token += ch;
+    }
+  }
+
+  // push last token if exists
+  if (token) {
+    result.push(token);
+  }
+
+  return result;
+}
+
+
+/**
+ * Check if key is valid array index
+ *
+ * Valid:
+ *  "0"
+ *  "1"
+ *  "2"
+ *
+ * Invalid:
+ *  "01"
+ *  "001"
+ *  "1a"
+ */
+function isArrayIndex(key: string): boolean {
+  return String(Number(key)) === key;
 }
