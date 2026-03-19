@@ -1,211 +1,198 @@
+// This is a JavaScript coding problem from BFE.dev 
+
 /**
- * OriginData describes the data stored per origin.
- *
  * @typedef {object} OriginData
- * @property {string} origin        // unique key (e.g. 'a', 'b', 'c')
- * @property {number} lastUsed      // timestamp of last access/update
- * @property {number} size          // size occupied by this origin
- * @property {boolean} persistent   // whether this origin can be evicted
+ * @property {string} origin
+ * @property {number} lastUsed
+ * @property {number} size
+ * @property {boolean} persistent
  */
 
-class MyLRUStorage {
+class MyLRUStorage  {
   /**
-   * @param {number} capacity              // max total size allowed
-   * @param {() => number} getTimestamp    // function returning current time
+   * @param {number} capacity
+   * @param {() => number} getTimestamp
    */
   constructor(capacity, getTimestamp) {
-    this.capacity = capacity;             // store total capacity
-    this.getTimestamp = getTimestamp;     // store timestamp generator
+    this.capacity = capacity;
+    this.getTimestamp = getTimestamp;
 
-    // Map preserves insertion order:
-    //   first entry  -> Least Recently Used (LRU)
-    //   last entry   -> Most Recently Used (MRU)
-    this.store = new Map();
+    // origin -> OriginData
+    this.storage = new Map();
 
-    // Tracks the sum of all stored sizes
-    this.totalSize = 0;
+    // total used storage
+    this.used = 0;
   }
 
   /**
-   * Marks an origin as recently used.
-   * Achieved by deleting and re-inserting it into the Map.
+   * Return data for the given origin, and mark it as recently used.
    *
-   * @param {string} origin
-   * @param {OriginData} data
-   */
-  _touch(origin, data) {
-    // Remove the key from its current position
-    this.store.delete(origin);
-
-    // Reinsert it so it becomes the most recently used (MRU)
-    this.store.set(origin, data);
-  }
-
-  /**
-   * Retrieve data for an origin.
-   * Updates lastUsed timestamp and LRU order.
+   * Time: O(1)
+   * Space: O(1)
    *
    * @param {string} origin
    * @returns {OriginData | undefined}
    */
   getData(origin) {
-    // Fetch data from the map
-    const data = this.store.get(origin);
+    if (!this.storage.has(origin)) {
+      return undefined;
+    }
 
-    // If origin does not exist, return undefined
-    if (!data) return undefined;
+    const data = this.storage.get(origin);
 
-    // Update last-used timestamp because it was accessed
+    // Access updates recency
     data.lastUsed = this.getTimestamp();
 
-    // Move this origin to MRU position
-    this._touch(origin, data);
-
-    // Return the stored data
     return data;
   }
 
   /**
-   * Evicts least-recently-used non-persistent origins
-   * until totalSize <= capacity.
+   * Insert or update an origin with the given size.
    *
-   * The origin being set is excluded from eviction.
+   * Rules:
+   * - If size itself is bigger than total capacity, impossible -> false
+   * - If origin already exists, we update its size and refresh lastUsed
+   * - If total used would exceed capacity, evict LRU non-persistent items
+   * - Persistent items cannot be evicted
    *
-   * @param {string} excludeOrigin
-   */
-  _evictIfNeeded(excludeOrigin) {
-    // Iterate in insertion order: LRU -> MRU
-    for (const [origin, data] of this.store) {
-      // Stop once we're within capacity
-      if (this.totalSize <= this.capacity) break;
-
-      // Do not evict the origin currently being set
-      if (origin === excludeOrigin) continue;
-
-      // Persistent data cannot be auto-evicted
-      if (data.persistent) continue;
-
-      // Evict this origin
-      this.store.delete(origin);
-
-      // Reduce total size
-      this.totalSize -= data.size;
-    }
-  }
-
-  /**
-   * Add or update data for an origin.
+   * Time: O(n^2) worst case with repeated scans for eviction
+   *       (fine for interview / BFE style unless optimized with heap/list)
+   * Space: O(1) extra, ignoring stored data
    *
    * @param {string} origin
    * @param {number} size
-   * @returns {boolean}   // success or failure
+   * @returns {boolean}
    */
   setData(origin, size) {
-    // -------------------------------
-    // SNAPSHOT for rollback
-    // -------------------------------
-
-    // Deep-copy the Map so mutations can be reverted
-    const snapshotStore = new Map(
-      [...this.store].map(([k, v]) => [k, { ...v }])
-    );
-
-    // Save total size for rollback
-    const snapshotTotal = this.totalSize;
-
-    // Check if this origin already exists
-    const existed = this.store.has(origin);
-
-    // Capture current timestamp
-    const now = this.getTimestamp();
-
-    // -------------------------------
-    // INSERT or UPDATE
-    // -------------------------------
-    if (!existed) {
-      // Create new origin data
-      const data = {
-        origin,
-        lastUsed: now,
-        size,
-        persistent: false,   // default: non-persistent
-      };
-
-      // Insert as MRU
-      this.store.set(origin, data);
-
-      // Increase total size
-      this.totalSize += size;
-    } else {
-      // Fetch existing data
-      const data = this.store.get(origin);
-
-      // Compute size difference
-      const delta = size - data.size;
-
-      // Update size and timestamp
-      data.size = size;
-      data.lastUsed = now;
-
-      // Adjust total size
-      this.totalSize += delta;
-
-      // Updating counts as usage → move to MRU
-      this._touch(origin, data);
-    }
-
-    // If still within capacity, operation succeeds
-    if (this.totalSize <= this.capacity) return true;
-
-    // -------------------------------
-    // EVICTION PHASE
-    // -------------------------------
-    this._evictIfNeeded(origin);
-
-    // If we still exceed capacity, rollback everything
-    if (this.totalSize > this.capacity) {
-      this.store = snapshotStore;     // restore previous Map
-      this.totalSize = snapshotTotal; // restore previous size
+    // If one item alone cannot fit, fail immediately
+    if (size > this.capacity) {
       return false;
     }
 
-    // Eviction succeeded
+    const now = this.getTimestamp();
+
+    // Case 1: updating existing origin
+    if (this.storage.has(origin)) {
+      const data = this.storage.get(origin);
+
+      // Temporarily remove old size from used
+      this.used -= data.size;
+
+      const oldSize = data.size;
+      data.size = size;
+      data.lastUsed = now;
+
+      // If it fits now, done
+      if (this.used + size <= this.capacity) {
+        this.used += size;
+        return true;
+      }
+
+      // Need eviction, but never evict persistent entries
+      // Also never evict the same origin we are currently updating
+      while (this.used + size > this.capacity) {
+        const victim = this.#findLRUNonPersistent(origin);
+
+        if (!victim) {
+          // rollback if impossible
+          data.size = oldSize;
+          this.used += oldSize;
+          return false;
+        }
+
+        this.storage.delete(victim.origin);
+        this.used -= victim.size;
+      }
+
+      this.used += size;
+      return true;
+    }
+
+    // Case 2: inserting new origin
+    while (this.used + size > this.capacity) {
+      const victim = this.#findLRUNonPersistent();
+
+      if (!victim) {
+        return false;
+      }
+
+      this.storage.delete(victim.origin);
+      this.used -= victim.size;
+    }
+
+    this.storage.set(origin, {
+      origin,
+      lastUsed: now,
+      size,
+      persistent: false,
+    });
+
+    this.used += size;
     return true;
   }
 
   /**
-   * Remove data for an origin manually.
+   * Remove data for an origin if present.
+   *
+   * Time: O(1)
+   * Space: O(1)
    *
    * @param {string} origin
+   * @returns {void}
    */
   clearData(origin) {
-    // Fetch data
-    const data = this.store.get(origin);
+    if (!this.storage.has(origin)) {
+      return;
+    }
 
-    // If not present, nothing to do
-    if (!data) return;
-
-    // Remove from Map
-    this.store.delete(origin);
-
-    // Update total size
-    this.totalSize -= data.size;
+    const data = this.storage.get(origin);
+    this.used -= data.size;
+    this.storage.delete(origin);
   }
 
   /**
    * Mark an existing origin as persistent.
-   * Persistent data cannot be evicted automatically.
+   *
+   * If origin doesn't exist, do nothing.
+   *
+   * Time: O(1)
+   * Space: O(1)
    *
    * @param {string} origin
+   * @returns {void}
    */
   makePersistent(origin) {
-    // Fetch data
-    const data = this.store.get(origin);
+    if (!this.storage.has(origin)) {
+      return;
+    }
 
-    // If origin does not exist, do nothing
-    if (!data) return;
-
-    // Mark as persistent
+    const data = this.storage.get(origin);
     data.persistent = true;
+  }
+
+  /**
+   * Find the least recently used non-persistent origin.
+   *
+   * excludeOrigin is used when updating an existing entry:
+   * we should not evict the same item we are currently resizing.
+   *
+   * Time: O(n)
+   *
+   * @param {string=} excludeOrigin
+   * @returns {OriginData | undefined}
+   */
+  #findLRUNonPersistent(excludeOrigin) {
+    let victim = undefined;
+
+    for (const data of this.storage.values()) {
+      if (data.persistent) continue;
+      if (data.origin === excludeOrigin) continue;
+
+      if (!victim || data.lastUsed < victim.lastUsed) {
+        victim = data;
+      }
+    }
+
+    return victim;
   }
 }
