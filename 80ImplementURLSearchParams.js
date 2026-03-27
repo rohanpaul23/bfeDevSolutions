@@ -1,141 +1,273 @@
 class MyURLSearchParams {
-  constructor(queryString = "") {
-    // Internal map to store parameters
-    // key -> array of values (to handle duplicate keys like ?a=1&a=2)
-    this.map = new Map();
+  /**
+   * Constructor accepts query string
+   * Example:
+   *  "a=1&b=2&a=3&name=rohan+paul"
+   *
+   * We store params internally as:
+   * [
+   *   ["a", "1"],
+   *   ["b", "2"],
+   *   ["a", "3"],
+   *   ["name", "rohan paul"]
+   * ]
+   *
+   * Why array of pairs?
+   * Because URLSearchParams allows duplicate keys
+   */
+  constructor(init = "") {
+    // Internal storage for key/value pairs
+    this.params = [];
 
-    // Remove leading '?' if present
-    if (queryString.startsWith("?")) queryString = queryString.slice(1);
+    // Only string allowed for this simplified version
+    if (typeof init !== "string") {
+      throw new TypeError("Expected init to be a string");
+    }
 
-    // Parse the query string into key/value pairs
-    if (queryString) {
-      for (const pair of queryString.split("&")) {
-        if (!pair) continue; // skip empty pairs (e.g., trailing '&')
-        const [rawKey, rawValue = ""] = pair.split("=");
+    // Remove leading "?" if exists
+    // "?a=1&b=2" -> "a=1&b=2"
+    if (init.startsWith("?")) {
+      init = init.slice(1);
+    }
 
-        // Decode percent-encoded characters (e.g., '%20' → ' ')
-        const key = decodeURIComponent(rawKey);
-        const value = decodeURIComponent(rawValue);
+    // Empty string -> nothing to parse
+    if (!init) return;
 
-        // Store into map (append handles duplicate keys)
-        this.append(key, value);
+    // Split by "&"
+    // "a=1&b=2&a=3" -> ["a=1", "b=2", "a=3"]
+    const pairs = init.split("&");
+
+    for (const pair of pairs) {
+      if (pair === "") continue;
+
+      // Find "=" position
+      // needed because value may contain "="
+      const equalIndex = pair.indexOf("=");
+
+      let key, value;
+
+      // If "=" not found
+      // example: "a"
+      if (equalIndex === -1) {
+        key = pair;
+        value = "";
+      } else {
+        key = pair.slice(0, equalIndex);
+        value = pair.slice(equalIndex + 1);
       }
+      key = decodeURIComponent(key)
+      value = decodeURIComponent(value)
+
+      // Decode encoded characters
+      // + -> space
+      // %20 -> space
+      this.params.push([
+        key,
+        value,
+      ]);
     }
   }
-
-  // Add a new key/value pair
-  // If key already exists, the value is added to its array (does not overwrite)
-  append(key, value) {
-    if (!this.map.has(key)) this.map.set(key, []);
-    this.map.get(key).push(String(value));
-  }
-
-  // Return the first value associated with a key, or null if not present
-  get(key) {
-    const values = this.map.get(key);
-    return values ? values[0] : null;
-  }
-
-  // Return all values associated with a key (array)
-  getAll(key) {
-    const values = this.map.get(key);
-    return values ? [...values] : [];
-  }
-
-  // Check if a key exists
-  has(key) {
-    return this.map.has(key);
-  }
-
-  // Replace all existing values for a key with a new single value
-  set(key, value) {
-    this.map.set(key, [String(value)]);
-  }
-
-  // Remove a key and all of its values
-  delete(key) {
-    this.map.delete(key);
-  }
-
-  // Serialize all entries into a query string like 'a=1&b=2'
-  toString() {
-    const pairs = [];
-    for (const [key, values] of this.map) {
-      for (const v of values) {
-        pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(v)}`);
-      }
-    }
-    return pairs.join("&");
-  }
-
-  // ----------- Iteration APIs -----------
-
-  // Return an iterator over [key, value] pairs (including duplicates)
-  *entries() {
-    for (const [key, values] of this.map) {
-      for (const v of values) yield [key, v];
-    }
-  }
-
-  // Return an iterator over keys (each key repeats for every value)
-  *keys() {
-    for (const [key, values] of this.map) {
-      for (let i = 0; i < values.length; i++) yield key;
-    }
-  }
-
-  // Return an iterator over values (in insertion order)
-  *values() {
-    for (const [, values] of this.map) {
-      for (const v of values) yield v;
-    }
-  }
-
-  // Execute a callback for each (value, key, this) triple
-  // Matches the native URLSearchParams.forEach(callback, thisArg)
-  forEach(callback, thisArg) {
-    for (const [key, values] of this.map) {
-      for (const v of values) {
-        callback.call(thisArg, v, key, this);
-      }
-    }
-  }
-
-  // Make the object directly iterable with for...of
-  // Example: for (const [key, value] of params) { ... }
-  [Symbol.iterator]() {
-    return this.entries();
-  }
-
-  // ----------- Sorting -----------
 
   /**
-   * Sort all key/value pairs by key name in Unicode order.
-   * The sort is stable — if two entries have the same key,
-   * their original order relative to each other is preserved.
+   * append(name, value)
+   *
+   * Adds new key/value pair
+   * Does NOT remove old ones
+   *
+   * a=1
+   * append(a,2)
+   * -> a=1&a=2
    */
-  sort() {
-    // Flatten current entries with their original index for stable sorting
-    const flat = [];
-    let idx = 0;
-    for (const [key, values] of this.map) {
-      for (const v of values) {
-        flat.push({ key, value: v, idx: idx++ });
+  append(name, value) {
+    this.params.push([String(name), String(value)]);
+  }
+
+  /**
+   * delete(name)
+   *
+   * Remove ALL pairs with this key
+   */
+  delete(name) {
+    name = String(name);
+
+    this.params = this.params.filter(
+      ([key]) => key !== name
+    );
+  }
+
+  /**
+   * entries()
+   *
+   * Returns iterator of [key, value]
+   *
+   * Needed for:
+   * for (const [k,v] of params)
+   */
+  *entries() {
+    for (const [key, value] of this.params) {
+      yield [key, value];
+    }
+  }
+
+  /**
+   * forEach(callback)
+   *
+   * callback(value, key)
+   * same order as URLSearchParams
+   */
+  forEach(callback) {
+    for (const [key, value] of this.params) {
+      callback(value, key);
+    }
+  }
+
+  /**
+   * get(name)
+   *
+   * Return FIRST value
+   * or null if not found
+   */
+  get(name) {
+    name = String(name);
+
+    for (const [key, value] of this.params) {
+      if (key === name) return value;
+    }
+
+    return null;
+  }
+
+  /**
+   * getAll(name)
+   *
+   * Return ALL values
+   */
+  getAll(name) {
+    name = String(name);
+
+    const result = [];
+
+    for (const [key, value] of this.params) {
+      if (key === name) {
+        result.push(value);
       }
     }
 
-    // Sort by key (lexicographically), keeping original order for ties
-    flat.sort((a, b) => {
-      if (a.key < b.key) return -1;
-      if (a.key > b.key) return 1;
-      return a.idx - b.idx; // maintain stability
-    });
+    return result;
+  }
 
-    // Rebuild the internal map from sorted data
-    this.map = new Map();
-    for (const { key, value } of flat) {
-      if (!this.map.has(key)) this.map.set(key, []);
-      this.map.get(key).push(value);
+  /**
+   * has(name)
+   *
+   * true if exists
+   */
+  has(name) {
+    name = String(name);
+
+    return this.params.some(
+      ([key]) => key === name
+    );
+  }
+
+  /**
+   * keys()
+   *
+   * iterator of keys
+   */
+  *keys() {
+    for (const [key] of this.params) {
+      yield key;
     }
+  }
+
+  /**
+   * set(name, value)
+   *
+   * Replace all existing values with one
+   *
+   * a=1&a=2
+   * set(a,10)
+   * -> a=10
+   */
+  set(name, value) {
+    name = String(name);
+    value = String(value);
+
+    let found = false;
+
+    const next = [];
+
+    for (const [key, val] of this.params) {
+      if (key === name) {
+        // only keep first occurrence
+        if (!found) {
+          next.push([name, value]);
+          found = true;
+        }
+      } else {
+        next.push([key, val]);
+      }
+    }
+    
+
+    // if not found, append
+    if (!found) {
+      next.push([name, value]);
+    }
+
+    this.params = next;
+  }
+
+  /**
+   * sort()
+   *
+   * sort by key alphabetically
+   */
+  sort() {
+    this.params.sort((a, b) => {
+      if (a[0] < b[0]) return -1;
+      if (a[0] > b[0]) return 1;
+      return 0;
+    });
+  }
+
+  /**
+   * toString()
+   *
+   * Convert back to query string
+   *
+   * [
+   *  ["a","1"],
+   *  ["b","2"]
+   * ]
+   *
+   * -> "a=1&b=2"
+   */
+  toString() {
+    return this.params
+      .map(([key, value]) =>
+        `${encodeURIComponent(key)}=${encodeURIComponent(value)}`
+      )
+      .join("&");
+  }
+
+  /**
+   * values()
+   *
+   * iterator of values
+   */
+  *values() {
+    for (const [, value] of this.params) {
+      yield value;
+    }
+  }
+
+  /**
+   * Make class iterable
+   *
+   * for (const [k,v] of params)
+   */
+  [Symbol.iterator]() {
+    return this.entries();
   }
 }

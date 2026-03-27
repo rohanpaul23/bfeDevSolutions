@@ -36,7 +36,7 @@ function throttlePromises(funcs, max){
       return Promise.all(batch.map(fn => fn()))
         .then(batchResults => {
           results = results.concat(batchResults);
-          return runBatch(); // Continue with next batch
+          return runBatch(); //  Continue with next batch
         });
     }
   
