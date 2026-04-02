@@ -1,26 +1,53 @@
-// fetchList is provided for you
-// const fetchList = (since?: number) => 
-//   Promise<{items: Array<{id: number}>}>
+/**
+ * Fetch up to `amount` items using cursor-based pagination.
+ *
+ * API rule:
+ * - first call: fetchList()
+ * - next call: fetchList(lastItemId)
+ * - stop when API returns no items
+ *
+ * @param {number} amount
+ * @returns {Promise<Array<{id: number}>>}
+ *
+ * Time Complexity:
+ * - O(k), where k = number of items actually collected
+ * - More precisely O(number of API calls + k)
+ *
+ * Space Complexity:
+ * - O(k) for the result array
+ */
+async function fetchListWithAmount(amount = 5) {
+  // If caller asks for 0 or negative amount, return empty array immediately
+  if (amount <= 0) {
+    return [];
+  }
 
-
-// you can change this to generator function if you want
-const fetchListWithAmount = async (amount = 5) => {
   const result = [];
-  let since = undefined; // initial request has no "since"
+  let since = undefined;
 
+  // Keep fetching until:
+  // 1) we collected enough items
+  // 2) API returns no more items
   while (result.length < amount) {
-    const { items } = await fetchList(since);
+    // Fetch one page
+    const response = await fetchList(since);
+    const items = response.items;
 
-    // If API returns nothing, we're done (no more data server-side)
-    if (!items || items.length === 0) break;
+    // If API returns no items, no more data exists
+    if (items.length === 0) {
+      break;
+    }
 
-    // Take only what's still needed to reach `amount`
-    const remaining = amount - result.length;
-    result.push(...items.slice(0, remaining));
+    // Add items one by one until we reach target amount
+    for (const item of items) {
+      if (result.length === amount) {
+        break;
+      }
+      result.push(item);
+    }
 
-    // Prepare `since` for the next page using the last item from this page
-    const last = items[items.length - 1];
-    since = last.id;
+    // Update cursor using the last item from current page
+    since = items[items.length - 1].id;
   }
 
   return result;

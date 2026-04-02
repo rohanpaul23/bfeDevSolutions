@@ -1,14 +1,29 @@
   function completeAssign(target, ...sources) {
-    if(target === null || target ===  undefined){
-      throw Error();
-    }
+     // null and undefined cannot be converted to objects,
+  // so copying into them is invalid
+  if (target === null || target === undefined) {
+    throw new Error();
+  }
 
-    target = Object(target);
-    for(const source of sources){
-      if(!source) continue;
-      Object.defineProperties(target,Object.getOwnPropertyDescriptors(source));
-    }
-    return target;
+  // Convert primitive target values into wrapper objects
+  // so properties can be defined on them
+  target = Object(target);
+
+  // Process each source one by one
+  for (const source of sources) {
+    // Skip only invalid sources
+    if (source === null || source === undefined) continue;
+
+    // Copy all own property descriptors from source to target
+    // This preserves getters, setters, and descriptor flags
+    Object.defineProperties(
+      target,
+      Object.getOwnPropertyDescriptors(Object(source))
+    );
+  }
+
+  // Return the modified target object
+  return target;
   }
 
 // Object.defineProperties() is a JavaScript method that defines or modifies multiple properties on an object at once, using property descriptors for each property.
