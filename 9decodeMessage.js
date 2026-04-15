@@ -3,8 +3,8 @@ function decode(message) {
     let j = 0;
     let res = [];
   
-    let totalRows = arr.length;
-    let totalColumns = arr[0].length;
+    let totalRows = message.length;
+    let totalColumns = message[0].length;
   
     while(i < totalRows && j < totalColumns){
         res.push(message[i++][j++])

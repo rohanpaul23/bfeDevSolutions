@@ -18,7 +18,7 @@ class Queue {
 
   dequeue() {
     const reversedQueue = this._reverse(this.allItems);
-    const poppedItem = reversedQueue.pop();
+    const poppedItem = reversedQueue.pop(); 
     this.allItems = this._reverse(reversedQueue);
     return poppedItem;
   }
