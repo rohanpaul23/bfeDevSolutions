@@ -1,290 +1,301 @@
 /**
- * MyPromise — an interview-grade Promise polyfill (Promises/A+-style core behavior)
+ * ============================
+ * Custom MyPromise Implementation
+ * ============================
  *
- * What this implementation supports:
- * ✅ State machine: pending -> fulfilled / rejected (only once)
- * ✅ Async handlers: `.then/.catch` callbacks run in microtasks
- * ✅ Chaining: `.then()` returns a new promise and adopts returned values/promises/thenables
- * ✅ Adoption: resolving with a promise/thenable "locks" the promise to that outcome
- * ✅ Safety: handles executor throw, thenable "call once" rule, and cycle detection
+ * What this implementation handles:
  *
- * What this does NOT implement (usually not required in interviews):
- * - unhandled rejection tracking
- * - `all`, `race`, `any`, `allSettled`
- * - cancellation
+ * 1. Basic Promise States
+ *    - pending → fulfilled / rejected
+ *    - state is immutable once settled
+ *
+ * 2. Executor behavior
+ *    - executor runs immediately
+ *    - synchronous errors inside executor → reject
+ *
+ * 3. Asynchronous resolution
+ *    - resolve/reject always happen in a microtask (queueMicrotask)
+ *
+ * 4. then() chaining
+ *    - returns a new MyPromise
+ *    - supports value transformation
+ *    - supports error propagation
+ *
+ * 5. Error handling
+ *    - errors thrown in callbacks → reject next promise
+ *
+ * 6. Promise adoption (VERY IMPORTANT)
+ *    - if resolve(value) where value is a MyPromise:
+ *        → current promise "follows" that promise
+ *    - if a then() callback returns a MyPromise:
+ *        → next promise adopts that returned promise
+ *
+ * 7. First call wins (resolve/reject)
+ *    - only the first resolve/reject matters
+ *    - later calls are ignored
+ *
+ * 8. Locking mechanism
+ *    - if resolve() is called with another promise:
+ *        → lock immediately
+ *        → prevent further resolve/reject calls
+ *
+ * 9. Multiple .then()
+ *    - callbacks are queued and executed in order
+ *
+ * 10. Static helpers
+ *    - MyPromise.resolve()
+ *    - MyPromise.reject()
+ *
+ * Limitations (intentionally simplified):
+ *    - Does NOT support generic thenables (only MyPromise)
+ *    - No finally()
+ *    - No Promise.all / race
  */
+
+
 class MyPromise {
   constructor(executor) {
-    // --- Internal state ---
-    this._state = "pending";   // "pending" | "fulfilled" | "rejected"
-    this._value = undefined;   // fulfillment value OR rejection reason
-    this._handlers = [];       // queued subscribers waiting for settlement
 
-    // When we "adopt" another promise/thenable, we must ignore further resolve/reject calls
-    // even though we haven't settled yet. This is the key to passing your failing test.
-    this._locked = false;
+    // -----------------------------
+    // Internal state tracking
+    // -----------------------------
+    this.value = undefined;      // stores resolved/rejected value
+    this.state = 'pending';      // 'pending' | 'fulfilled' | 'rejected'
 
-    // Wrap resolve/reject so:
-    // 1) user can call them safely
-    // 2) we preserve correct `this`
-    const resolve = (value) => this._resolve(value);
-    const reject = (reason) => this._reject(reason);
+    // -----------------------------
+    // Callback queues
+    // -----------------------------
+    this.thenCallbacks = [];     // success handlers
+    this.errorCallbacks = [];    // error handlers
 
-    // The executor runs immediately and synchronously.
-    // If it throws, the promise rejects.
+    // -----------------------------
+    // Lock flag
+    // -----------------------------
+    // Prevents multiple resolve/reject calls
+    // especially important when resolving with another promise
+    this.isLocked = false;
+
+    // -----------------------------
+    // Execute executor immediately
+    // -----------------------------
     try {
-      executor(resolve, reject);
-    } catch (err) {
-      reject(err);
+      executor(this.resolve.bind(this), this.reject.bind(this));
+    } catch (e) {
+      // If executor throws → reject
+      this.reject(e);
     }
   }
 
-  /**
-   * Resolve logic:
-   * - If we get a plain value => fulfill immediately.
-   * - If we get a promise/thenable => adopt it ("become" it), and LOCK immediately.
-   */
-  _resolve(value) {
-    // Rule: A promise settles only once.
-    // Also: if we already started adopting something, ignore other attempts.
-    if (this._state !== "pending" || this._locked) return;
 
-    // Self-resolution guard (cycle)
-    if (value === this) {
-      return this._reject(new TypeError("Cannot resolve promise with itself"));
+  /**
+   * Executes all stored callbacks based on state
+   */
+  runAllCallbacks() {
+
+    // -----------------------------
+    // Fulfilled case
+    // -----------------------------
+    if (this.state === 'fulfilled') {
+
+      const callbacks = this.thenCallbacks;
+
+      // Clear queues before running to avoid re-entrancy issues
+      this.thenCallbacks = [];
+      this.errorCallbacks = [];
+
+      callbacks.forEach(cb => cb(this.value));
     }
 
-    // If `value` is an object/function, it might be a thenable.
-    // Promises must adopt thenables, not just instances of MyPromise.
-    if (value !== null && (typeof value === "object" || typeof value === "function")) {
-      let then;
-      try {
-        // Accessing `then` can throw (getter).
-        then = value.then;
-      } catch (err) {
-        return this._reject(err);
-      }
+    // -----------------------------
+    // Rejected case
+    // -----------------------------
+    else if (this.state === 'rejected') {
 
-      if (typeof then === "function") {
-        // Adoption begins: LOCK immediately so further resolve/reject calls are ignored.
-        this._locked = true;
+      const callbacks = this.errorCallbacks;
 
-        // "Call once" rule: a thenable may try to resolve/reject multiple times.
-        let called = false;
+      this.thenCallbacks = [];
+      this.errorCallbacks = [];
 
-        try {
-          then.call(
-            value,
-            (y) => {
-              if (called) return;
-              called = true;
-              // Keep adopting recursively (in case y is another thenable)
-              this._locked = false; // (optional) state will move to settled soon anyway
-              this._resolve(y);
-            },
-            (r) => {
-              if (called) return;
-              called = true;
-              this._locked = false;
-              this._reject(r);
-            }
-          );
-        } catch (err) {
-          // If then throws before it calls resolve/reject, reject.
-          if (!called) {
-            this._locked = false;
-            this._reject(err);
-          }
-        }
-        return;
-      }
+      callbacks.forEach(cb => cb(this.value));
     }
-
-    // Plain value: fulfill immediately
-    this._fulfill(value);
   }
 
-  /**
-   * Fulfill the promise with a value (only if still pending).
-   */
-  _fulfill(value) {
-    if (this._state !== "pending") return;
-    this._state = "fulfilled";
-    this._value = value;
-    this._flushHandlers();
-  }
 
   /**
-   * Reject the promise with a reason (only if still pending and not locked by adoption).
+   * Resolve the promise
    */
-  _reject(reason) {
-    if (this._state !== "pending" || this._locked) return;
-    this._state = "rejected";
-    this._value = reason;
-    this._flushHandlers();
-  }
+  resolve(value) {
 
-  /**
-   * Run all queued handlers asynchronously (microtask), then clear the queue.
-   * Promise callbacks must never run synchronously in the same tick.
-   */
-  _flushHandlers() {
+    // Always async (microtask)
     queueMicrotask(() => {
-      // Drain the queue and clear it (avoid memory leaks + double runs).
-      const handlers = this._handlers;
-      this._handlers = [];
 
-      for (const h of handlers) {
-        this._runOneHandler(h);
+      // Ignore if already settled OR locked
+      if (this.state !== 'pending' || this.isLocked) return;
+
+      // -----------------------------
+      // Promise adoption
+      // -----------------------------
+      // If resolving with another MyPromise:
+      // → lock immediately
+      // → follow its result
+      if (value instanceof MyPromise) {
+
+        this.isLocked = true;
+
+        return value.then(
+
+          // When inner promise fulfills
+          (val) => {
+            if (this.state !== 'pending') return;
+
+            this.state = 'fulfilled';
+            this.value = val;
+
+            this.runAllCallbacks();
+          },
+
+          // When inner promise rejects
+          (err) => {
+            if (this.state !== 'pending') return;
+
+            this.state = 'rejected';
+            this.value = err;
+
+            this.runAllCallbacks();
+          }
+        );
       }
+
+      // -----------------------------
+      // Normal resolution
+      // -----------------------------
+      this.state = 'fulfilled';
+      this.value = value;
+
+      this.runAllCallbacks();
     });
   }
 
-  /**
-   * Execute a single `.then` handler record, and settle the chained promise accordingly.
-   */
-  _runOneHandler(handlerRecord) {
-    const { onFulfilled, onRejected, resolve, reject, promise2 } = handlerRecord;
 
-    try {
-      if (this._state === "fulfilled") {
-        // Run the fulfillment handler
-        const x = onFulfilled(this._value);
-        // Whatever it returns settles `promise2` following the resolution procedure
-        MyPromise._resolvePromise(promise2, x, resolve, reject);
-      } else {
-        // Run the rejection handler
-        const x = onRejected(this._value);
-        MyPromise._resolvePromise(promise2, x, resolve, reject);
-      }
-    } catch (err) {
-      // Exceptions inside handlers reject the chained promise
-      reject(err);
-    }
+  /**
+   * Reject the promise
+   */
+  reject(reason) {
+
+    queueMicrotask(() => {
+
+      // Ignore if already settled OR locked
+      if (this.state !== 'pending' || this.isLocked) return;
+
+      this.state = 'rejected';
+      this.value = reason;
+
+      this.runAllCallbacks();
+    });
   }
 
+
   /**
-   * then(onFulfilled, onRejected)
+   * then() method
    *
-   * - returns a new promise (promise2)
-   * - registers handlers on the current promise
-   * - if current promise already settled, schedule flush immediately
+   * Returns a new promise
    */
   then(onFulfilled, onRejected) {
-    // Spec behavior:
-    // - if onFulfilled is not a function, use identity
-    // - if onRejected is not a function, use thrower (propagate errors)
-    const realOnFulfilled =
-      typeof onFulfilled === "function" ? onFulfilled : (v) => v;
 
-    const realOnRejected =
-      typeof onRejected === "function"
-        ? onRejected
-        : (e) => {
-            throw e;
-          };
+    return new MyPromise((resolve, reject) => {
 
-    // Create the chained promise
-    let promise2;
-    promise2 = new MyPromise((resolve, reject) => {
-      // Store the handler record
-      this._handlers.push({
-        onFulfilled: realOnFulfilled,
-        onRejected: realOnRejected,
-        resolve,
-        reject,
-        promise2, // used for cycle detection in resolve procedure
-      });
+      // -----------------------------
+      // Success wrapper
+      // -----------------------------
+      const handleFulfilled = (result) => {
 
-      // If already settled, ensure handlers run (async).
-      if (this._state !== "pending") {
-        this._flushHandlers();
+        // If no handler → pass value forward
+        if (typeof onFulfilled !== 'function') {
+          return resolve(result);
+        }
+
+        try {
+          const returnedValue = onFulfilled(result);
+
+          // 🔥 CRITICAL LINE
+          // Handles:
+          // - normal value
+          // - thrown error
+          // - returned promise (adoption)
+          resolve(returnedValue);
+
+        } catch (e) {
+          reject(e);
+        }
+      };
+
+
+      // -----------------------------
+      // Error wrapper
+      // -----------------------------
+      const handleRejected = (reason) => {
+
+        if (typeof onRejected !== 'function') {
+          return reject(reason);
+        }
+
+        try {
+          const returnedValue = onRejected(reason);
+
+          // If error handler returns value → chain becomes fulfilled
+          resolve(returnedValue);
+
+        } catch (e) {
+          reject(e);
+        }
+      };
+
+
+      // -----------------------------
+      // Based on current state
+      // -----------------------------
+
+      if (this.state === 'pending') {
+
+        // Still pending → store callbacks
+        this.thenCallbacks.push(handleFulfilled);
+        this.errorCallbacks.push(handleRejected);
+
+      } else if (this.state === 'fulfilled') {
+
+        // Already fulfilled → schedule immediately
+        queueMicrotask(() => handleFulfilled(this.value));
+
+      } else if (this.state === 'rejected') {
+
+        // Already rejected → schedule immediately
+        queueMicrotask(() => handleRejected(this.value));
       }
     });
-
-    return promise2;
   }
 
+
   /**
-   * catch(onRejected) is just then(undefined, onRejected)
+   * catch() = then(null, onRejected)
    */
   catch(onRejected) {
-    return this.then(undefined, onRejected);
+    return this.then(null, onRejected);
   }
 
-  /**
-   * Promise Resolution Procedure for chaining:
-   * settle promise2 based on x (return value of a handler)
-   *
-   * Handles:
-   * - cycle detection (promise2 === x)
-   * - adopting MyPromise
-   * - adopting thenables
-   * - plain values
-   */
-  static _resolvePromise(promise2, x, resolve, reject) {
-    // Cycle detection: `return promise2` from a handler must reject
-    if (promise2 === x) {
-      return reject(new TypeError("Chaining cycle detected"));
-    }
-
-    // If x is a MyPromise, adopt it
-    if (x instanceof MyPromise) {
-      return x.then(resolve, reject);
-    }
-
-    // If x is an object/function, it might be a thenable
-    if (x !== null && (typeof x === "object" || typeof x === "function")) {
-      let then;
-      try {
-        then = x.then;
-      } catch (err) {
-        return reject(err);
-      }
-
-      if (typeof then === "function") {
-        let called = false;
-        try {
-          then.call(
-            x,
-            (y) => {
-              if (called) return;
-              called = true;
-              // Resolve recursively in case y is another thenable
-              MyPromise._resolvePromise(promise2, y, resolve, reject);
-            },
-            (r) => {
-              if (called) return;
-              called = true;
-              reject(r);
-            }
-          );
-        } catch (err) {
-          if (!called) reject(err);
-        }
-        return;
-      }
-    }
-
-    // Otherwise, x is a plain value
-    resolve(x);
-  }
 
   /**
-   * MyPromise.resolve(value)
-   * - returns value if it's already a MyPromise
-   * - otherwise returns a fulfilled MyPromise
+   * Static resolve
    */
   static resolve(value) {
     if (value instanceof MyPromise) return value;
-    return new MyPromise((res) => res(value));
+    return new MyPromise((resolve) => resolve(value));
   }
 
+
   /**
-   * MyPromise.reject(reason)
-   * - returns a rejected MyPromise
+   * Static reject
    */
-  static reject(reason) {
-    return new MyPromise((_, rej) => rej(reason));
+  static reject(value) {
+    return new MyPromise((_, reject) => reject(value));
   }
 }

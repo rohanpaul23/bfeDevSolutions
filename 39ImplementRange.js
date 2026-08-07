@@ -1,22 +1,34 @@
+/**
+ * @param {integer} from - starting value of the range (inclusive)
+ * @param {integer} to   - ending value of the range (inclusive)
+ */
 function range(from, to) {
-  // Return an object that implements the iterator protocol
+  // We return an object that is ITERABLE
+  // i.e., it implements [Symbol.iterator]()
   return {
-    // Define the method that returns the iterator itself
     [Symbol.iterator]() {
-      // The iterator object must have a 'next()' method
-      return {
-        // 'next()' is called each time the iterator advances
-        next() {
-          // Return an object with 'done' and 'value' properties
-          return {
-            // 'done' tells whether the iteration should stop
-            // When 'from' becomes greater than 'to', iteration ends
-            done: from > to,
+      // IMPORTANT:
+      // We create a LOCAL copy of `from` for iteration state.
+      // This ensures:
+      // 1. Each iteration gets its own state
+      // 2. Original `from` is not mutated
+      let current = from;
 
-            // 'value' is the current number in the range
-            // It returns the current 'from' value, then increments it
-            value: from++
-          };
+      // The iterator object must have a `next()` method
+      return {
+        next() {
+          // If we have crossed the range, iteration is complete
+          if (current > to) {
+            return {
+              done: true // tells JS iteration should stop
+            };
+          } else {
+            // Otherwise return current value and move forward
+            return {
+              done: false,     // still more values to produce
+              value: current++ // return current, then increment
+            };
+          }
         }
       };
     }
