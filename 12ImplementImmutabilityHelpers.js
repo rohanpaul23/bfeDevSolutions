@@ -1,105 +1,84 @@
-/**
- * Performs an immutable update on an object or array,
- * according to a “command” specification.
- *
- * @param {Object|Array} data    The original data (object or array)
- * @param {Object}        command A command object describing the updates
- * @returns {Object|Array}        A new data structure with updates applied
- */
 function update(data, command) {
-  // Ensure we only operate on objects or arrays
-  if (typeof data !== 'object' && !Array.isArray(data)) {
-    throw new Error('update: first argument must be an object or array');
+
+  // ---------------------------------------------
+  // $set
+  // ---------------------------------------------
+  // Completely replace the current target.
+  if (
+    command &&
+    Object.prototype.hasOwnProperty.call(command, "$set")
+  ) {
+    return command.$set;
   }
 
-  // Shallow‐copy the root so we don’t mutate the original
-  // - For arrays: create a new array with the same elements
-  // - For objects: create a new object with the same own properties
-  let copiedData = Array.isArray(data)
+  // ---------------------------------------------
+  // $apply
+  // ---------------------------------------------
+  // Apply a function to the current target
+  // and replace it with the returned value.
+  if (
+    command &&
+    Object.prototype.hasOwnProperty.call(command, "$apply")
+  ) {
+    return command.$apply(data);
+  }
+
+  // ---------------------------------------------
+  // $push
+  // ---------------------------------------------
+  // Target must be an array.
+  if (
+    command &&
+    Object.prototype.hasOwnProperty.call(command, "$push")
+  ) {
+    if (!Array.isArray(data)) {
+      throw new Error("$push target must be an array");
+    }
+
+    return [
+      ...data,
+      ...command.$push
+    ];
+  }
+
+  // ---------------------------------------------
+  // $merge
+  // ---------------------------------------------
+  // Target must be an object.
+  if (
+    command &&
+    Object.prototype.hasOwnProperty.call(command, "$merge")
+  ) {
+    if (
+      typeof data !== "object" ||
+      data === null ||
+      Array.isArray(data)
+    ) {
+      throw new Error("$merge target must be an object");
+    }
+
+    return {
+      ...data,
+      ...command.$merge
+    };
+  }
+
+  // ---------------------------------------------
+  // Nested update
+  // ---------------------------------------------
+
+  // Copy only the current level.
+  const result = Array.isArray(data)
     ? [...data]
     : { ...data };
 
-  // Apply the nested updates
-  _update(copiedData, command);
-
-  // Return the new, updated copy
-  return copiedData;
-}
-
-/**
- * Recursively walks the command object and applies updates
- * to `data` in place (but `data` itself is already a shallow copy).
- *
- * Supported commands under each key:
- *   - $push  : append items to an array
- *   - $set   : replace a value
- *   - $apply : transform a value via function
- *   - $merge : shallow‐merge into an object
- *
- * You can also nest commands to update deep paths.
- *
- * @param {Object|Array} data    The (copied) data to mutate here
- * @param {Object}        command The command spec for this level
- */
-function _update(data, command) {
+  // Process each nested key.
   for (const key in command) {
-    // 1) $push: append elements into an array
-    if (
-      key === '$push' &&
-      Array.isArray(command.$push) &&
-      Array.isArray(data)
-    ) {
-      data.push(...command.$push);
-      return; // done with this command
-    }
-
-    // 2) $set: replace a property or array index
-    if (
-      typeof command[key] === 'object' &&
-      command[key].hasOwnProperty('$set')
-    ) {
-      data[key] = command[key].$set;
-      return; // stop further processing at this branch
-    }
-
-    // 3) $apply: apply a function to existing value (array‐specific here)
-    if (
-      typeof command[key] === 'object' &&
-      command[key].hasOwnProperty('$apply') &&
-      Array.isArray(data)
-    ) {
-      // Only apply if the index/key exists
-      if (data[key] !== undefined) {
-        data[key] = command[key].$apply(data[key]);
-        return;
-      }
-    }
-
-    // 4) $merge: shallow‐merge an object into data[key]
-    if (
-      typeof command[key] === 'object' &&
-      command[key].hasOwnProperty('$merge')
-    ) {
-      // Only valid if target is already an object
-      if (typeof data[key] === 'object' && data[key] !== null) {
-        data[key] = {
-          ...data[key],
-          ...command[key].$merge,
-        };
-        return;
-      } else {
-        throw new Error('update: cannot merge into non‐object');
-      }
-    }
-
-    // 5) Nested commands: descend into object property or array index
-    if (typeof command[key] === 'object') {
-      // e.g. command = { user: { stats: { $set: {...} } } }
-      _update(data[key], command[key]);
-      // no return here, in case there are multiple sibling keys
-    }
+    result[key] = update(
+      data[key],
+      command[key]
+    );
   }
+
+  return result;
 }
-
-
-update([1], {$push: [2, 3]}) 
